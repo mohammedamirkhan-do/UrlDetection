@@ -2,9 +2,11 @@
 
 Qt 6 / C++ desktop application that displays the **foreground application's name, exposed URL and window title** on macOS. Click **Start monitoring**, then switch between apps. Foreground-app activation and supported Accessibility notifications trigger reads, coalesced within 150 ms. A 10-second fallback catches changes that do not emit usable notifications. The most recent 1,000 application/URL/title changes are shown with local timestamps; consecutive identical samples are omitted.
 
-Samples with neither a URL nor a nonblank window title are retried without adding a history row or replacing the last successful activity. Opening the detector's own window does not reset duplicate detection. Actual changes to URL or title and returning after activity in another application still create entries.
+Samples with neither a URL nor a nonblank window title are retried without adding a history row or replacing the last successful activity. Opening the detector's own window does not reset duplicate detection. URL/application changes, non-browser title changes and returning after activity in another application create entries. Browser title updates enrich the latest matching visit instead of creating another row.
 
 Known browsers additionally require a valid full URL before an activity row is recorded. A title-only loading sample is retried rather than logged as a separate visit, preventing an empty-URL row immediately before the completed URL. Other applications can still record title-only activity.
+
+A browser URL with an empty title waits up to 1.5 seconds, retrying every 500 ms, before entering history. This lets a quick redirect and its page title arrive together, while still recording pages that are genuinely untitled. Later title changes for the same application's consecutive URL update the existing row without changing its original detection time. A transient empty title does not erase an already captured title. Distinct URLs are preserved as distinct visits once recorded; redirect targets are not guessed from hostname or scheme similarities.
 
 ## Additional browser coverage
 

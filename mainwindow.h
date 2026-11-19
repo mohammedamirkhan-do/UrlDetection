@@ -3,6 +3,7 @@
 
 #include <QMainWindow>
 #include <QHash>
+#include <QElapsedTimer>
 #include "browserprobe.h"
 
 class QLabel;
@@ -24,6 +25,7 @@ public:
 private:
     void pollBrowser();
     void finishSample(int exitCode);
+    void displayActivity(const QString &url, const QString &title);
     void setMonitoring(bool enabled);
 
     QLabel *status;
@@ -41,6 +43,9 @@ private:
     QString lastId;
     QString lastUrl;
     QString lastTitle;
+    QString titleWaitId;
+    QString titleWaitUrl;
+    QElapsedTimer titleWait;
     bool monitoring = false;
     bool discardSample = false;
     bool refreshPending = false;

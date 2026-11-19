@@ -105,6 +105,7 @@ MainWindow::MainWindow(QWidget *parent)
         lastId.clear();
         lastUrl.clear();
         lastTitle.clear();
+        titleWait.invalidate();
     });
     connect(probe, &QProcess::finished, this, [this](int code, QProcess::ExitStatus) {
         finishSample(code);
@@ -142,6 +143,7 @@ void MainWindow::setMonitoring(bool enabled)
     lastId.clear();
     lastUrl.clear();
     lastTitle.clear();
+    titleWait.invalidate();
     if (enabled) {
         // Request from the visible app, not from a short-lived reader process.
         accessibilityAccess(true);
@@ -226,16 +228,50 @@ void MainWindow::finishSample(int exitCode)
         }
         return;
     }
-    status->setText(url.isEmpty()
-        ? pending.name + ": no URL exposed; showing the window title."
-        : "Monitoring " + pending.name + " — event triggers with a 10-second fallback.");
+    displayActivity(url, title);
+}
+
+void MainWindow::displayActivity(const QString &url, const QString &title)
+{
+    const bool browser = isSupportedBrowser(pending.id);
     application->setText(pending.name);
     currentUrl->setText(url);
     currentUrl->setCursorPosition(0);
     windowTitle->setText(title);
     windowTitle->setCursorPosition(0);
+
+    if (browser && title.trimmed().isEmpty()) {
+        if (lastId == pending.id && lastUrl == url && !lastTitle.trimmed().isEmpty()) {
+            windowTitle->setText(lastTitle);
+            status->setText("Monitoring " + pending.name + " — retaining the last available title for this URL.");
+            return;
+        }
+        if (!titleWait.isValid() || titleWaitId != pending.id || titleWaitUrl != url) {
+            titleWaitId = pending.id;
+            titleWaitUrl = url;
+            titleWait.start();
+        }
+        // Allow redirects/title metadata to settle without losing genuinely untitled pages.
+        if (titleWait.elapsed() < 1500) {
+            status->setText(pending.name + ": URL detected; waiting briefly for the page title.");
+            retryTimer->start(500);
+            return;
+        }
+    } else {
+        titleWait.invalidate();
+    }
+    retryTimer->stop();
+    status->setText(url.isEmpty()
+        ? pending.name + ": no URL exposed; showing the window title."
+        : "Monitoring " + pending.name + " — event triggers with a 10-second fallback.");
     if (lastId == pending.id && lastUrl == url && lastTitle == title)
         return;
+    if (browser && lastId == pending.id && lastUrl == url && history->rowCount() > 0) {
+        lastTitle = title;
+        history->item(0, 3)->setText(title);
+        history->item(0, 3)->setToolTip(title);
+        return;
+    }
     lastId = pending.id;
     lastUrl = url;
     lastTitle = title;
