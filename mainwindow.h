@@ -1,0 +1,49 @@
+#ifndef MAINWINDOW_H
+#define MAINWINDOW_H
+
+#include <QMainWindow>
+#include <QHash>
+#include "browserprobe.h"
+
+class QLabel;
+class QLineEdit;
+class QPushButton;
+class QTableWidget;
+class QTimer;
+class QProcess;
+class ActivityTrigger;
+
+class MainWindow : public QMainWindow
+{
+    Q_OBJECT
+
+public:
+    explicit MainWindow(QWidget *parent = nullptr);
+    ~MainWindow() override;
+
+private:
+    void pollBrowser();
+    void finishSample(int exitCode);
+    void setMonitoring(bool enabled);
+
+    QLabel *status;
+    QLineEdit *application;
+    QLineEdit *currentUrl;
+    QLineEdit *windowTitle;
+    QPushButton *toggle;
+    QTableWidget *history;
+    ActivityTrigger *trigger;
+    QTimer *retryTimer;
+    QTimer *timeout;
+    QProcess *probe;
+    BrowserApplication pending;
+    QHash<QString, QString> browserErrors;
+    QString lastId;
+    QString lastUrl;
+    QString lastTitle;
+    bool monitoring = false;
+    bool discardSample = false;
+    bool refreshPending = false;
+    int remainingRetries = 0;
+};
+#endif // MAINWINDOW_H

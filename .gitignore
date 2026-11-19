@@ -1,0 +1,9 @@
+/build/
+/build-*/
+/cmake-build-*/
+/.qtcreator/
+/.DS_Store
+*.user
+*.user.*
+/.env
+/.env.*

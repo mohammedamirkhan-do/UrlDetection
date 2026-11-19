@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key><string>${MACOSX_BUNDLE_EXECUTABLE_NAME}</string>
+    <key>CFBundleIdentifier</key><string>com.urldetection.desktop</string>
+    <key>CFBundleName</key><string>UrlDetection</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleVersion</key><string>1.0</string>
+    <key>NSHighResolutionCapable</key><true/>
+    <!-- Start without a Dock tile; only the main UI process opts into regular activation. -->
+    <key>LSUIElement</key><true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Display the full URL and title of the active browser tab when you enable monitoring.</string>
+</dict>
+</plist>
