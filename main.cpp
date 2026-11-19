@@ -9,11 +9,12 @@
 int main(int argc, char *argv[])
 {
     // Isolate browser IPC so a permission dialog or unresponsive browser cannot freeze the UI.
-    if (argc == 3 && QString::fromLocal8Bit(argv[1]) == "--read-browser-url") {
+    if ((argc == 3 || argc == 4) && QString::fromLocal8Bit(argv[1]) == "--read-browser-url") {
         const bool background = configureApplicationActivation(true);
         QCoreApplication app(argc, argv);
+        const bool allowPrompt = argc == 4 && QString::fromLocal8Bit(argv[3]) == "--allow-automation-prompt";
         const BrowserResult result = background
-            ? readBrowserUrl(QString::fromLocal8Bit(argv[2]))
+            ? readBrowserUrl(QString::fromLocal8Bit(argv[2]), allowPrompt)
             : BrowserResult{{}, "Unable to start the browser reader in background mode."};
         const QByteArray output = QJsonDocument(QJsonObject{
             {"url", result.url}, {"error", result.error}, {"title", result.title}

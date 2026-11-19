@@ -3,6 +3,7 @@
 
 #import <AppKit/AppKit.h>
 #import <ApplicationServices/ApplicationServices.h>
+#import <CoreServices/CoreServices.h>
 #include <libproc.h>
 #include <unistd.h>
 #include <cstring>
@@ -78,9 +79,10 @@ static QString attributeText(AXUIElementRef element, CFStringRef attribute)
 }
 
 static QString documentUrl(AXUIElementRef element, int depth, int &remaining,
-                           bool allowAddressFields, bool inToolbar = false)
+                           const QString &applicationId, bool allowAddressFields, bool inToolbar = false)
 {
-    if (depth > 12 || --remaining < 0)
+    // Vivaldi's web-based browser interface nests the active page around 20 levels deep.
+    if (depth > (applicationId == "com.vivaldi.Vivaldi" ? 24 : 12) || --remaining < 0)
         return {};
     AXUIElementSetMessagingTimeout(element, 0.1);
     const QString role = attributeText(element, kAXRoleAttribute);
@@ -89,11 +91,15 @@ static QString documentUrl(AXUIElementRef element, int depth, int &remaining,
         || attributeText(element, kAXSubroleAttribute) == "AXSecureTextField")
         return {};
     QString url = attributeText(element, kAXDocumentAttribute);
-    if (isFullUrl(url))
+    if (isFullUrl(url) && !isBrowserInterfaceUrl(applicationId, url))
         return url;
     if (role == "AXWebArea") {
         url = attributeText(element, kAXURLAttribute);
-        return isFullUrl(url) ? url : QString();
+        if (isFullUrl(url) && !isBrowserInterfaceUrl(applicationId, url))
+            return url;
+        // Vivaldi wraps the page in a web-based browser UI; continue through that wrapper.
+        if (!isBrowserInterfaceUrl(applicationId, url))
+            return {};
     }
     inToolbar = inToolbar || role == "AXToolbar";
     if (allowAddressFields && inToolbar && (role == "AXTextField" || role == "AXComboBox")) {
@@ -112,7 +118,7 @@ static QString documentUrl(AXUIElementRef element, int depth, int &remaining,
                 auto child = static_cast<AXUIElementRef>(const_cast<void *>(CFArrayGetValueAtIndex(array, i)));
                 if (CFGetTypeID(child) != AXUIElementGetTypeID())
                     continue;
-                result = documentUrl(child, depth + 1, remaining, allowAddressFields, inToolbar);
+                result = documentUrl(child, depth + 1, remaining, applicationId, allowAddressFields, inToolbar);
                 if (!result.isEmpty())
                     break;
             }
@@ -122,14 +128,15 @@ static QString documentUrl(AXUIElementRef element, int depth, int &remaining,
     return result;
 }
 
-static QString focusedDocumentUrl(AXUIElementRef application)
+static QString focusedDocumentUrl(AXUIElementRef application, const QString &applicationId)
 {
     CFTypeRef focused = nullptr;
     if (AXUIElementCopyAttributeValue(application, kAXFocusedUIElementAttribute, &focused) != kAXErrorSuccess)
         return {};
     QString url;
     bool reachedWindow = false;
-    for (int depth = 0; focused && depth < 16; ++depth) {
+    const int maximumDepth = applicationId == "com.vivaldi.Vivaldi" ? 32 : 16;
+    for (int depth = 0; focused && depth < maximumDepth; ++depth) {
         if (CFGetTypeID(focused) != AXUIElementGetTypeID())
             break;
         auto element = static_cast<AXUIElementRef>(focused);
@@ -144,7 +151,8 @@ static QString focusedDocumentUrl(AXUIElementRef application)
             if (!isFullUrl(candidate))
                 candidate = attributeText(element, kAXDocumentAttribute);
             // Keep the outer document URL rather than an embedded iframe's address.
-            url = isFullUrl(candidate) ? candidate : QString();
+            if (!isBrowserInterfaceUrl(applicationId, candidate))
+                url = isFullUrl(candidate) ? candidate : QString();
         }
         CFTypeRef parent = nullptr;
         AXUIElementCopyAttributeValue(element, kAXParentAttribute, &parent);
@@ -175,12 +183,13 @@ static BrowserResult readAccessibleWindow(NSRunningApplication *app)
             auto element = static_cast<AXUIElementRef>(window);
             AXUIElementSetMessagingTimeout(element, 0.1);
             result.title = attributeText(element, kAXTitleAttribute);
-            const bool browser = isSupportedBrowser(QString::fromNSString(app.bundleIdentifier));
+            const QString id = QString::fromNSString(app.bundleIdentifier);
+            const bool browser = isSupportedBrowser(id);
             if (browser)
-                result.url = focusedDocumentUrl(application);
-            int remaining = 100;
+                result.url = focusedDocumentUrl(application, id);
+            int remaining = id == "com.vivaldi.Vivaldi" ? 300 : 100;
             if (result.url.isEmpty())
-                result.url = documentUrl(element, 0, remaining, !browser);
+                result.url = documentUrl(element, 0, remaining, id, !browser);
         }
         CFRelease(window);
     } else if (error == kAXErrorAPIDisabled) {
@@ -190,7 +199,17 @@ static BrowserResult readAccessibleWindow(NSRunningApplication *app)
     return result;
 }
 
-BrowserResult readBrowserUrl(const QString &id)
+static bool browserAutomationGranted(NSRunningApplication *app)
+{
+    const pid_t pid = applicationProcessId(app.processIdentifier, app.executableURL.path);
+    if (pid <= 0)
+        return false;
+    NSAppleEventDescriptor *target = [NSAppleEventDescriptor descriptorWithProcessIdentifier:pid];
+    // This preflight runs only in the reader subprocess and never requests consent.
+    return target && AEDeterminePermissionToAutomateTarget(target.aeDesc, kAECoreSuite, kAEGetData, false) == noErr;
+}
+
+BrowserResult readBrowserUrl(const QString &id, bool allowAutomationPrompt)
 {
     @autoreleasepool {
         NSRunningApplication *app = NSWorkspace.sharedWorkspace.frontmostApplication;
@@ -198,7 +217,7 @@ BrowserResult readBrowserUrl(const QString &id)
             return {};
 
         const QString source = browserUrlScript(id);
-        if (source.isEmpty()) {
+        if (source.isEmpty() || (!allowAutomationPrompt && !browserAutomationGranted(app))) {
             const BrowserResult result = readAccessibleWindow(app);
             if (QString::fromNSString(NSWorkspace.sharedWorkspace.frontmostApplication.bundleIdentifier) != id)
                 return {};
@@ -220,12 +239,17 @@ BrowserResult readBrowserUrl(const QString &id)
         [script release];
         if (QString::fromNSString(NSWorkspace.sharedWorkspace.frontmostApplication.bundleIdentifier) != id)
             return {};
-        if ((!message.isEmpty() || !isFullUrl(url)) && accessibilityAccess()) {
+        if ((!message.isEmpty() || !isFullUrl(url) || title.trimmed().isEmpty()) && accessibilityAccess()) {
             const BrowserResult fallback = readAccessibleWindow(app);
             if (QString::fromNSString(NSWorkspace.sharedWorkspace.frontmostApplication.bundleIdentifier) != id)
                 return {};
-            if (isFullUrl(fallback.url) || (fallback.error.isEmpty() && !fallback.title.isEmpty()))
+            if (message.isEmpty() && isFullUrl(url)) {
+                if (title.trimmed().isEmpty() && !fallback.title.trimmed().isEmpty()
+                    && (fallback.url.isEmpty() || fallback.url == url))
+                    title = fallback.title;
+            } else if (isFullUrl(fallback.url) || (fallback.error.isEmpty() && !fallback.title.isEmpty())) {
                 return fallback;
+            }
         }
         return {url, message, title};
     }

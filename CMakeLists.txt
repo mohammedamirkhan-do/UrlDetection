@@ -21,7 +21,7 @@ qt_add_executable(UrlDetection
 if(APPLE)
     enable_language(OBJCXX)
     target_sources(UrlDetection PRIVATE browserprobe_mac.mm activitytrigger_mac.mm)
-    target_link_libraries(UrlDetection PRIVATE "-framework AppKit" "-framework ApplicationServices")
+    target_link_libraries(UrlDetection PRIVATE "-framework AppKit" "-framework ApplicationServices" "-framework CoreServices")
     set_target_properties(UrlDetection PROPERTIES
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in")
 endif()

@@ -43,9 +43,11 @@ QString browserUrlScript(const QString &id)
     return "with timeout of 3 seconds\ntell application id \"" + id
         + "\"\nif (count of windows) is 0 then return {\"\", \"\"}\nset selectedTab to "
         + (safari ? "current tab" : "active tab")
-        + " of front window\nreturn {URL of selectedTab, "
+        + " of front window\nset detectedTitle to "
         + (safari ? "name" : "title")
-        + " of selectedTab}\nend tell\nend timeout";
+        + " of selectedTab\nif detectedTitle is missing value then set detectedTitle to \"\"\n"
+          "if detectedTitle is \"\" then\ntry\nset detectedTitle to name of front window\nend try\nend if\n"
+          "return {URL of selectedTab, detectedTitle}\nend tell\nend timeout";
 }
 
 bool isFullUrl(const QString &value)
@@ -58,12 +60,21 @@ bool isFullUrl(const QString &value)
     return !url.path().isEmpty() || !url.host().isEmpty();
 }
 
+bool isBrowserInterfaceUrl(const QString &applicationId, const QString &value)
+{
+    const QUrl url(value);
+    return applicationId == "com.vivaldi.Vivaldi"
+        && url.scheme() == "chrome-extension"
+        && url.host() == "mpognobbkildjkofajifpdfhcoklimli"
+        && (url.path() == "/window.html" || url.path() == "/browser.html");
+}
+
 bool BrowserResult::canRecordActivity(const QString &applicationId) const
 {
     if (!error.isEmpty())
         return false;
     if (isSupportedBrowser(applicationId))
-        return isFullUrl(url);
+        return isFullUrl(url) && !isBrowserInterfaceUrl(applicationId, url);
     return isFullUrl(url) || !title.trimmed().isEmpty();
 }
 
@@ -83,7 +94,7 @@ QString accessibleAddressUrl(const QString &role, const QString &identity,
 bool accessibilityAccess(bool) { return false; }
 bool configureApplicationActivation(bool) { return true; }
 BrowserApplication foregroundApplication() { return {}; }
-BrowserResult readBrowserUrl(const QString &)
+BrowserResult readBrowserUrl(const QString &, bool)
 {
     return {{}, "Application detection is currently implemented for macOS only."};
 }

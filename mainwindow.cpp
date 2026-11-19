@@ -2,6 +2,7 @@
 #include "activitytrigger.h"
 
 #include <QCoreApplication>
+#include <QCheckBox>
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QHeaderView>
@@ -26,7 +27,7 @@ MainWindow::MainWindow(QWidget *parent)
     auto *layout = new QVBoxLayout(content);
     auto *description = new QLabel(
         "Detect URLs and window titles on application, focus and accessibility changes.\n"
-        "Enable Accessibility for general apps. Browsers also use Automation. macOS only.");
+        "Enable Accessibility. Existing browser Automation grants are used; new prompts are optional. macOS only.");
     description->setWordWrap(true);
     layout->addWidget(description);
 
@@ -41,6 +42,9 @@ MainWindow::MainWindow(QWidget *parent)
     buttons->addWidget(clear);
     buttons->addStretch();
     layout->addLayout(buttons);
+    automationPrompts = new QCheckBox("Allow browser Automation permission prompts");
+    automationPrompts->setToolTip("Off: use Accessibility or an existing browser grant. On: macOS may ask permission to read a browser through Automation.");
+    layout->addWidget(automationPrompts);
     status = new QLabel("Stopped. Start monitoring, then switch to an application. macOS may request permission.");
     status->setWordWrap(true);
     status->setTextFormat(Qt::PlainText);
@@ -84,6 +88,11 @@ MainWindow::MainWindow(QWidget *parent)
     });
     connect(retryTimer, &QTimer::timeout, this, &MainWindow::pollBrowser);
     connect(toggle, &QPushButton::clicked, this, [this] { setMonitoring(!monitoring); });
+    connect(automationPrompts, &QCheckBox::toggled, this, [this] {
+        browserErrors.clear();
+        if (monitoring)
+            trigger->requestCheck();
+    });
     connect(accessibility, &QPushButton::clicked, this, [this] {
         accessibilityAccess(true);
         status->setText("Enable UrlDetection in the access list. If absent, click + and select the built UrlDetection.app, then click Retry permissions.");
@@ -132,6 +141,7 @@ MainWindow::MainWindow(QWidget *parent)
     toggle->setEnabled(false);
     retry->setEnabled(false);
     accessibility->setEnabled(false);
+    automationPrompts->setEnabled(false);
     status->setText("Application detection is currently implemented for macOS only.");
 #endif
 }
@@ -185,8 +195,11 @@ void MainWindow::pollBrowser()
     }
     pending = app;
     discardSample = false;
-    status->setText("Reading " + app.name + "… Allow macOS access if prompted.");
-    probe->start(QCoreApplication::applicationFilePath(), {"--read-browser-url", app.id});
+    status->setText("Reading " + app.name + "…");
+    QStringList arguments{"--read-browser-url", app.id};
+    if (automationPrompts->isChecked())
+        arguments.append("--allow-automation-prompt");
+    probe->start(QCoreApplication::applicationFilePath(), arguments);
     timeout->start(15000);
 }
 

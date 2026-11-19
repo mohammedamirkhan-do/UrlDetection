@@ -13,6 +13,7 @@ class QTableWidget;
 class QTimer;
 class QProcess;
 class ActivityTrigger;
+class QCheckBox;
 
 class MainWindow : public QMainWindow
 {
@@ -33,6 +34,7 @@ private:
     QLineEdit *currentUrl;
     QLineEdit *windowTitle;
     QPushButton *toggle;
+    QCheckBox *automationPrompts;
     QTableWidget *history;
     ActivityTrigger *trigger;
     QTimer *retryTimer;
