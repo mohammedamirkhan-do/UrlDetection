@@ -18,6 +18,9 @@ struct BrowserResult {
 BrowserApplication foregroundApplication();
 bool configureApplicationActivation(bool background);
 bool accessibilityAccess(bool prompt = false);
+enum class BrowserReader { GenericAccessibility, BrowserAccessibility, Safari, Chromium };
+BrowserReader browserReader(const QString &id);
+QString browserUrlScript(const QString &id);
 bool isSupportedBrowser(const QString &id);
 bool isFullUrl(const QString &value);
 QString accessibleAddressUrl(const QString &role, const QString &identity,

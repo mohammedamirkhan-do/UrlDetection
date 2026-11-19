@@ -2,13 +2,50 @@
 
 #include <QUrl>
 
+BrowserReader browserReader(const QString &id)
+{
+    static const struct { const char *id; BrowserReader reader; } browsers[] = {
+        {"com.apple.Safari", BrowserReader::Safari},
+        {"com.apple.SafariTechnologyPreview", BrowserReader::Safari},
+        {"com.google.Chrome", BrowserReader::Chromium},
+        {"com.google.Chrome.beta", BrowserReader::Chromium},
+        {"com.microsoft.edgemac", BrowserReader::Chromium},
+        {"com.brave.Browser", BrowserReader::Chromium},
+        {"com.operasoftware.Opera", BrowserReader::Chromium},
+        {"com.operasoftware.OperaGX", BrowserReader::Chromium},
+        {"com.vivaldi.Vivaldi", BrowserReader::Chromium},
+        {"ru.yandex.desktop.yandex-browser", BrowserReader::Chromium},
+        {"org.chromium.Chromium", BrowserReader::Chromium},
+        {"company.thebrowser.Browser", BrowserReader::Chromium},
+        {"org.mozilla.firefox", BrowserReader::BrowserAccessibility},
+        {"com.duckduckgo.macos.browser", BrowserReader::BrowserAccessibility},
+        {"org.torproject.torbrowser", BrowserReader::BrowserAccessibility},
+        {"org.mozilla.tor browser", BrowserReader::BrowserAccessibility},
+    };
+    for (const auto &browser : browsers)
+        if (id == QLatin1String(browser.id))
+            return browser.reader;
+    return BrowserReader::GenericAccessibility;
+}
+
 bool isSupportedBrowser(const QString &id)
 {
-    return id == "com.apple.Safari" || id == "com.apple.SafariTechnologyPreview"
-        || id == "com.google.Chrome" || id == "com.google.Chrome.beta"
-        || id == "com.microsoft.edgemac" || id == "com.brave.Browser"
-        || id == "com.operasoftware.Opera" || id == "com.vivaldi.Vivaldi"
-        || id == "org.mozilla.firefox";
+    return browserReader(id) != BrowserReader::GenericAccessibility;
+}
+
+QString browserUrlScript(const QString &id)
+{
+    const auto reader = browserReader(id);
+    if (reader != BrowserReader::Safari && reader != BrowserReader::Chromium)
+        return {};
+    // Bundle IDs come from the exact registry above, never arbitrary application or page text.
+    const bool safari = reader == BrowserReader::Safari;
+    return "with timeout of 3 seconds\ntell application id \"" + id
+        + "\"\nif (count of windows) is 0 then return {\"\", \"\"}\nset selectedTab to "
+        + (safari ? "current tab" : "active tab")
+        + " of front window\nreturn {URL of selectedTab, "
+        + (safari ? "name" : "title")
+        + " of selectedTab}\nend tell\nend timeout";
 }
 
 bool isFullUrl(const QString &value)

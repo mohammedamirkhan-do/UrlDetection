@@ -6,10 +6,35 @@ Samples with neither a URL nor a nonblank window title are retried without addin
 
 Known browsers additionally require a valid full URL before an activity row is recorded. A title-only loading sample is retried rather than logged as a separate visit, preventing an empty-URL row immediately before the completed URL. Other applications can still record title-only activity.
 
+## Additional browser coverage
+
+The registry in `browserprobe.cpp` separates browser recognition from the URL reader. The nine additional macOS browsers below are installed on the development Mac, and normal/private-window detection has been reported working during manual testing. These implementation routes do not guarantee coverage of every browser version or privacy configuration.
+
+| Browser | macOS implementation / limitation |
+| --- | --- |
+| Opera | Existing Chromium-style AppleScript route; Accessibility fallback added |
+| Opera GX | Chromium-style AppleScript route for `com.operasoftware.OperaGX`, with Accessibility fallback |
+| Brave | Existing Chromium-style AppleScript route; Accessibility fallback added |
+| Samsung Internet / Samsung Browser | No macOS adapter: the official desktop release is for Windows; mobile detection requires a separate platform integration |
+| UC Browser | No verified official macOS build or bundle ID; no guessed adapter added |
+| Vivaldi | Existing Chromium-style AppleScript route; Accessibility fallback added |
+| Arc | Chromium-style active-tab AppleScript route for `company.thebrowser.Browser`, with Accessibility fallback; vendor availability/account requirements may limit testing |
+| DuckDuckGo Browser | Focused document/web-area Accessibility reader for `com.duckduckgo.macos.browser`; no Chrome scripting assumption |
+| Tor Browser | Focused document/web-area Accessibility reader for `org.torproject.torbrowser` and the legacy `org.mozilla.tor browser`; requires the browser to expose page metadata |
+| Yandex Browser | Chromium-style AppleScript route for `ru.yandex.desktop.yandex-browser`, with Accessibility fallback |
+| Chromium | Chromium-style AppleScript route for `org.chromium.Chromium`, with Accessibility fallback |
+| Firefox Focus | No macOS desktop adapter: Mozilla lists iOS and Android versions |
+
+Browser Accessibility reads prefer the focused document's outer web area so an embedded frame's address is not selected as the page URL. They use document/web-area metadata rather than typed address-bar text. If the browser does not expose a full URL, the detector retries without inventing a scheme or recording a title-only browser visit. General non-browser apps retain their toolbar-address fallback.
+
+Normal and private windows use the same foreground-window reader. No history files, browser extensions, clipboard operations, remote debugging, or browser privacy-setting changes are used. Correct private-window behavior still needs to be verified on each installed browser; a browser that withholds its page URL cannot be guaranteed to work through Accessibility alone.
+
+Platform and identity references: [Apple's browser identifiers](https://github.com/apple/password-manager-resources/blob/main/quirks/web-browser-extension-distribution-information.json), [Tor Browser's macOS package metadata](https://github.com/Homebrew/homebrew-cask/blob/master/Casks/t/tor-browser.rb), [DuckDuckGo's macOS application source](https://github.com/duckduckgo/apple-browsers/tree/main/macOS), [Samsung desktop availability](https://browser.samsung.com/), [Firefox Focus platforms](https://www.mozilla.org/firefox/browsers/mobile/focus/), [UC Browser official downloads](https://www.ucweb.com/download/pc), [Arc availability](https://resources.arc.net/hc/en-us/articles/19337669022103-Arc-for-Desktop-macOS-and-Windows).
+
 ## Applications and permissions
 
-- Safari (including Technology Preview), Chrome (including Beta), Edge, Brave, Opera and Vivaldi: the app reads the active tab URL using Apple Events. Allow each browser when macOS prompts. If denied, open **System Settings → Privacy & Security → Automation**, enable that browser under UrlDetection, then click **Retry permissions** and return to the browser.
-- **All other foreground apps, including Firefox:** click **Accessibility settings**, enable UrlDetection in **Privacy & Security → Accessibility** (add the built `.app` using + if needed), click **Retry permissions**, and return to the target app. No application allowlist is used for this path. The reader queries the focused window's title and document URL; it also checks exposed web-area URLs and recognized address fields in toolbars. If no URL is exposed, the URL field is empty and the window title is displayed separately. Apps without a focused window or accessibility metadata may provide neither.
+- Safari (including Technology Preview), Chrome (including Beta), Edge, Brave, Opera, Opera GX, Vivaldi, Yandex, Chromium and Arc: the app first reads the active tab URL using Apple Events. Allow each browser when macOS prompts. An unavailable or failed scripting read also tries Accessibility when that permission is already enabled. If needed, open **System Settings → Privacy & Security → Automation**, enable that browser under UrlDetection, then click **Retry permissions** and return to the browser.
+- **Firefox, DuckDuckGo, Tor and general foreground apps:** click **Accessibility settings**, enable UrlDetection in **Privacy & Security → Accessibility** (add the built `.app` using + if needed), click **Retry permissions**, and return to the target app. The reader queries the focused window's title and document URL, and exposed web-area URLs. General apps additionally support recognized toolbar address fields. Browser activity requires a full URL; general apps can record a window title alone. Apps without a focused window or accessibility metadata may provide neither.
 
 The generic reader has a bounded scan (100 elements, 12 levels). It ignores links, document body text and secure fields rather than collecting unrelated URLs or typed content. A toolbar address field must expose a full URL; missing schemes are never guessed. Custom controls and localized address descriptions may require an app-specific integration.
 
@@ -45,6 +70,8 @@ open build/local/UrlDetection.app
 ```
 
 To test manually, start monitoring and visit a URL with a path, query and fragment (for example `https://example.com/?q=test#section`); confirm the exact URL and application name appear promptly after the event (or within the fallback interval where a notification is unsupported). Open a second tab with another site, switch back, then switch browsers. Check that each detected change adds a row, an unchanged page does not repeatedly add rows, and permission denial displays an actionable error. Also switch to a text editor or IDE: confirm the application name, window title and any exposed document URL (possibly `file://`) appear. Switch documents and confirm the title changes, then return to a browser and check its full URL. Test Stop, Clear history and Retry permissions as well. Native accessibility behavior must be checked in a desktop session with Accessibility granted.
+
+Repeat the browser checks in a private/incognito window where the browser offers one, including normal-to-private window switching and tab switching inside the private window. Test the fallback with Automation unavailable and Accessibility enabled. For DuckDuckGo and Tor, specifically confirm that the full scheme, path, query and fragment are exposed; a matching window title alone does not count as URL verification. Keep the same-title/different-URL case open for the 10-second fallback interval before calling it missed.
 
 ## Scope
 

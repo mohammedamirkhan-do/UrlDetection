@@ -77,7 +77,8 @@ static QString attributeText(AXUIElementRef element, CFStringRef attribute)
     return text;
 }
 
-static QString documentUrl(AXUIElementRef element, int depth, int &remaining, bool inToolbar = false)
+static QString documentUrl(AXUIElementRef element, int depth, int &remaining,
+                           bool allowAddressFields, bool inToolbar = false)
 {
     if (depth > 12 || --remaining < 0)
         return {};
@@ -95,7 +96,7 @@ static QString documentUrl(AXUIElementRef element, int depth, int &remaining, bo
         return isFullUrl(url) ? url : QString();
     }
     inToolbar = inToolbar || role == "AXToolbar";
-    if (inToolbar && (role == "AXTextField" || role == "AXComboBox")) {
+    if (allowAddressFields && inToolbar && (role == "AXTextField" || role == "AXComboBox")) {
         const QString identity = attributeText(element, kAXIdentifierAttribute) + " "
             + attributeText(element, kAXDescriptionAttribute);
         url = accessibleAddressUrl(role, identity, attributeText(element, kAXValueAttribute), inToolbar);
@@ -111,7 +112,7 @@ static QString documentUrl(AXUIElementRef element, int depth, int &remaining, bo
                 auto child = static_cast<AXUIElementRef>(const_cast<void *>(CFArrayGetValueAtIndex(array, i)));
                 if (CFGetTypeID(child) != AXUIElementGetTypeID())
                     continue;
-                result = documentUrl(child, depth + 1, remaining, inToolbar);
+                result = documentUrl(child, depth + 1, remaining, allowAddressFields, inToolbar);
                 if (!result.isEmpty())
                     break;
             }
@@ -119,6 +120,40 @@ static QString documentUrl(AXUIElementRef element, int depth, int &remaining, bo
         CFRelease(children);
     }
     return result;
+}
+
+static QString focusedDocumentUrl(AXUIElementRef application)
+{
+    CFTypeRef focused = nullptr;
+    if (AXUIElementCopyAttributeValue(application, kAXFocusedUIElementAttribute, &focused) != kAXErrorSuccess)
+        return {};
+    QString url;
+    bool reachedWindow = false;
+    for (int depth = 0; focused && depth < 16; ++depth) {
+        if (CFGetTypeID(focused) != AXUIElementGetTypeID())
+            break;
+        auto element = static_cast<AXUIElementRef>(focused);
+        AXUIElementSetMessagingTimeout(element, 0.05);
+        const QString role = attributeText(element, kAXRoleAttribute);
+        if (role == "AXWindow" || role == "AXApplication") {
+            reachedWindow = true;
+            break;
+        }
+        if (role == "AXWebArea") {
+            QString candidate = attributeText(element, kAXURLAttribute);
+            if (!isFullUrl(candidate))
+                candidate = attributeText(element, kAXDocumentAttribute);
+            // Keep the outer document URL rather than an embedded iframe's address.
+            url = isFullUrl(candidate) ? candidate : QString();
+        }
+        CFTypeRef parent = nullptr;
+        AXUIElementCopyAttributeValue(element, kAXParentAttribute, &parent);
+        CFRelease(focused);
+        focused = parent;
+    }
+    if (focused)
+        CFRelease(focused);
+    return reachedWindow ? url : QString();
 }
 
 static BrowserResult readAccessibleWindow(NSRunningApplication *app)
@@ -140,8 +175,12 @@ static BrowserResult readAccessibleWindow(NSRunningApplication *app)
             auto element = static_cast<AXUIElementRef>(window);
             AXUIElementSetMessagingTimeout(element, 0.1);
             result.title = attributeText(element, kAXTitleAttribute);
+            const bool browser = isSupportedBrowser(QString::fromNSString(app.bundleIdentifier));
+            if (browser)
+                result.url = focusedDocumentUrl(application);
             int remaining = 100;
-            result.url = documentUrl(element, 0, remaining);
+            if (result.url.isEmpty())
+                result.url = documentUrl(element, 0, remaining, !browser);
         }
         CFRelease(window);
     } else if (error == kAXErrorAPIDisabled) {
@@ -158,21 +197,14 @@ BrowserResult readBrowserUrl(const QString &id)
         if (QString::fromNSString(app.bundleIdentifier) != id)
             return {};
 
-        if (!isSupportedBrowser(id) || id == "org.mozilla.firefox") {
+        const QString source = browserUrlScript(id);
+        if (source.isEmpty()) {
             const BrowserResult result = readAccessibleWindow(app);
             if (QString::fromNSString(NSWorkspace.sharedWorkspace.frontmostApplication.bundleIdentifier) != id)
                 return {};
             return result;
         }
 
-        // Only fixed, supported bundle IDs enter the script; no URL or page text is executed.
-        const bool safari = id.startsWith("com.apple.Safari");
-        QString source = "with timeout of 3 seconds\ntell application id \"" + id
-            + "\"\nif (count of windows) is 0 then return {\"\", \"\"}\nset selectedTab to "
-            + (safari ? "current tab" : "active tab")
-            + " of front window\nreturn {URL of selectedTab, "
-            + (safari ? "name" : "title")
-            + " of selectedTab}\nend tell\nend timeout";
         NSAppleScript *script = [[NSAppleScript alloc] initWithSource:source.toNSString()];
         NSDictionary *error = nil;
         NSAppleEventDescriptor *reply = [script executeAndReturnError:&error];
@@ -188,6 +220,13 @@ BrowserResult readBrowserUrl(const QString &id)
         [script release];
         if (QString::fromNSString(NSWorkspace.sharedWorkspace.frontmostApplication.bundleIdentifier) != id)
             return {};
+        if ((!message.isEmpty() || !isFullUrl(url)) && accessibilityAccess()) {
+            const BrowserResult fallback = readAccessibleWindow(app);
+            if (QString::fromNSString(NSWorkspace.sharedWorkspace.frontmostApplication.bundleIdentifier) != id)
+                return {};
+            if (isFullUrl(fallback.url) || (fallback.error.isEmpty() && !fallback.title.isEmpty()))
+                return fallback;
+        }
         return {url, message, title};
     }
 }
