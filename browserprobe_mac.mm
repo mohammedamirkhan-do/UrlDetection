@@ -175,6 +175,10 @@ static BrowserResult readAccessibleWindow(NSRunningApplication *app)
     AXUIElementSetMessagingTimeout(application, 0.2);
     // Firefox initializes its page accessibility tree when the application role is requested.
     attributeText(application, kAXRoleAttribute);
+    const QString id = QString::fromNSString(app.bundleIdentifier);
+    // Opera does not expose page web areas until Chromium accessibility is requested.
+    if (id == "com.operasoftware.Opera" || id == "com.operasoftware.OperaGX")
+        AXUIElementSetAttributeValue(application, CFSTR("AXEnhancedUserInterface"), kCFBooleanTrue);
     CFTypeRef window = nullptr;
     BrowserResult result;
     const AXError error = AXUIElementCopyAttributeValue(application, kAXFocusedWindowAttribute, &window);
@@ -183,7 +187,6 @@ static BrowserResult readAccessibleWindow(NSRunningApplication *app)
             auto element = static_cast<AXUIElementRef>(window);
             AXUIElementSetMessagingTimeout(element, 0.1);
             result.title = attributeText(element, kAXTitleAttribute);
-            const QString id = QString::fromNSString(app.bundleIdentifier);
             const bool browser = isSupportedBrowser(id);
             if (browser)
                 result.url = focusedDocumentUrl(application, id);
