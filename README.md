@@ -13,15 +13,17 @@ A browser URL with an empty title waits up to 1.5 seconds, retrying every 500 ms
 ```text
 src/
   app/                 # Entry point, worker modes and main window
+  core/                # Supervised background-worker lifecycle
   modules/
     detection/         # Browser registry, URL metadata and event supervision
     blocking/          # Config/policy, block-list controls and tab-close scripts
+    uploads/           # File-attachment attempt capture and history
   platform/mac/        # Shared AppKit/Accessibility/Apple Events adapters
 resources/macos/       # Application bundle metadata
 config/                # Editable domain list, also bundled as a default
 ```
 
-The two feature modules share the macOS adapter because reading and closing must use the same browser identity, focused window and URL checks. Platform code is kept out of the domain-policy parser and UI. The source tree is grouped in Qt Creator by CMake; open the root `CMakeLists.txt` as before. Config paths and the bundled executable name are unchanged.
+The detection and blocking modules share the macOS adapter because reading and closing must use the same browser identity, focused window and URL checks. Platform code is kept out of the domain-policy parser and UI. The source tree is grouped in Qt Creator by CMake; open the root `CMakeLists.txt` as before. Config paths and the bundled executable name are unchanged.
 
 The GUI uses one persistent `--watch-activity` process for native observation and at most one short-lived `--read-browser-url` process for reading/closing. This keeps native Accessibility IPC and AppleScript work outside the UI event loop without moving AppKit calls onto arbitrary threads. The observer runs its own native event loop in accessory mode, with no window or Dock tile. Changes are coalesced at 150 ms; the GUI retains its 10-second fallback. A five-second health heartbeat is process supervision, not browser URL polling.
 
@@ -141,3 +143,24 @@ Repeat the browser checks in a private/incognito window where the browser offers
 - Windows and Linux builds show an unsupported-platform message; they need separate browser integrations.
 
 Platform references: [Apple Events usage description](https://developer.apple.com/documentation/bundleresources/protected-resources), [Accessibility attribute reads](https://developer.apple.com/documentation/applicationservices/1462085-axuielementcopyattributevalue), [document URL attribute](https://developer.apple.com/documentation/applicationservices/kaxdocumentattribute), [title attribute](https://developer.apple.com/documentation/applicationservices/kaxtitleattribute).
+
+
+## File attachment attempts (macOS)
+
+Open **File attachment attempts**, enable **Detect file attachment attempts while monitoring**, and click **Start monitoring**. Grant Accessibility to UrlDetection. If capture reports input access unavailable, use **Input Monitoring settings**, enable UrlDetection there, and click **Retry capture**. No administrator helper or Apple Developer signing is required for this observation method. macOS may still require user consent; it is not bypassed.
+
+The table displays application, time, method, exposed absolute file path and evidence. History stays in memory, capped at 1,000 rows; it is not transmitted. Capture is opt-in each launch. Stopping monitoring also stops file capture. Double-click an available path to copy it. File contents and ordinary typed text are not captured.
+
+| Method | Signal used | Limits |
+| --- | --- | --- |
+| File chooser | Accessibility selection plus an Open/Attach confirmation click or Return | Recognized native chooser layouts; not every custom picker, language, double-click selection or very fast dialog is covered. Opening a document can look like attaching a file. |
+| Drag and drop | A file-typed drag pasteboard that changes during the current mouse gesture, with a destination hit-test | Target and acceptance are inferred. A rejected drag can still be an attempt. Finder-to-Finder moves are excluded. |
+| Copy and paste | Command-V with typed file URLs, file promises or image types on the pasteboard | Edit-menu paste and app-specific commands are not covered. Images/promises may expose no original path. Plain text that resembles a path is ignored. |
+
+**These are file interactions / attachment attempts, not confirmation of a completed upload.** macOS has no universal public “file uploaded” event across all apps. An application can reject a paste/drop, or a user can remove an attachment before sending. Background synchronization is not covered. Telegram, WhatsApp, ChatGPT and other apps can be observed when they expose these OS signals; this is not a claim that every version and interaction in every app has been validated. Reliable completion reporting needs cooperation from the browser/application or an appropriate managed network integration.
+
+Only explicit local file references are accepted. macOS file-ID URLs are resolved by the OS to their real paths; unresolved IDs, remote file URLs, relative names and guessed filenames are not displayed as paths. No Spotlight lookup or disk search is used. Promised files and clipboard images without a source path show **Unavailable — original path not exposed**. File gestures are attributed to applications; they do not prove which website received a file. The application-activity tab continues to show browser URLs separately.
+
+A separate supervised `--watch-file-activity` process performs Accessibility, pasteboard and input-tap work. Input taps listen without blocking or injecting input. AX notifications supplement chooser/active-drag scans with a 250 ms pause between timed scans; the URL module's event triggers and 10-second fallback are unchanged. Bounded scans, timeouts, heartbeats and worker restarts keep native IPC off the GUI thread. Events during a worker interruption can be missed and are not reconstructed.
+
+Validation on the development Mac: build, exact-path parsing/caps, private-pasteboard file/text/image cases, file-ID resolution, UI deduplication/repeated attempts/history limits, native chooser recognition, an actual-worker local chooser confirmation with its exact selected path/application, and worker startup/heartbeat and crash/stall recovery. Full end-to-end acceptance in each third-party app still needs manual testing: chooser Open versus Cancel, multi-file selection, drag/drop versus rejected drop, file paste versus plain text, repeated attachment of the same file, and pathless images/promises. Use local dummy files; verify the displayed path and destination each time.

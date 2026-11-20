@@ -1,6 +1,7 @@
 #include "blocking/tabcloser.h"
 #include "detection/activitytrigger.h"
 #include "mainwindow.h"
+#include "uploads/fileactivity.h"
 #include "detection/browserprobe.h"
 #include "blocking/websitepolicy.h"
 
@@ -12,12 +13,14 @@
 
 int main(int argc, char *argv[])
 {
-    if (argc == 2 && QString::fromLocal8Bit(argv[1]) == "--watch-activity") {
+    if (argc == 2 && (QString::fromLocal8Bit(argv[1]) == "--watch-activity" || QString::fromLocal8Bit(argv[1]) == "--watch-file-activity")) {
         QCoreApplication::setAttribute(Qt::AA_PluginApplication);
         configureObserverActivation();
         QApplication app(argc, argv);
         if (!configureObserverActivation())
             return 1;
+        if (QString::fromLocal8Bit(argv[1]) == "--watch-file-activity")
+            return runFileActivityWorker(app);
         ActivityTrigger observer(nullptr, true);
         const auto send = [](const char *message) {
             const bool delivered = std::fputs(message, stdout) >= 0 && std::fflush(stdout) == 0;

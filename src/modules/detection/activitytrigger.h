@@ -2,8 +2,7 @@
 
 #include <QObject>
 #include <QTimer>
-#include <QProcess>
-#include <QElapsedTimer>
+#include "core/workerprocess.h"
 
 class ActivityTrigger : public QObject
 {
@@ -22,15 +21,9 @@ private:
     void startNative();
     void stopNative();
     void refreshNative();
-    void startObserverProcess();
     QTimer debounce;
     QTimer fallback;
-    QTimer restart;
-    QTimer watchdog;
-    QProcess observerProcess;
-    QElapsedTimer lastAlive;
-    QByteArray observerOutput;
-    int restartDelay = 1000;
+    WorkerProcess observerProcess{"--watch-activity"};
     bool nativeObserverMode;
     bool active = false;
     void *nativeState = nullptr;

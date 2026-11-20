@@ -13,6 +13,12 @@ qt_standard_project_setup()
 
 qt_add_executable(UrlDetection
     WIN32 MACOSX_BUNDLE
+    src/core/workerprocess.cpp
+    src/core/workerprocess.h
+    src/modules/uploads/fileactivity.cpp
+    src/modules/uploads/fileactivity.h
+    src/modules/uploads/uploadmonitor.cpp
+    src/modules/uploads/uploadmonitor.h
     src/app/main.cpp
     src/app/mainwindow.cpp
     src/app/mainwindow.h
@@ -27,7 +33,7 @@ qt_add_executable(UrlDetection
     src/modules/blocking/tabcloser.cpp
     src/modules/blocking/tabcloser.h
 )
-target_include_directories(UrlDetection PRIVATE src/modules)
+target_include_directories(UrlDetection PRIVATE src src/modules)
 
 qt_add_resources(UrlDetection "website_block_defaults"
     PREFIX "/"
@@ -38,6 +44,7 @@ if(APPLE)
     enable_language(OBJCXX)
     target_sources(UrlDetection PRIVATE
         src/platform/mac/browserintegration.mm
+        src/platform/mac/fileactivity.mm
         src/platform/mac/activityobserver.mm
         src/platform/mac/macprocess.h
     )

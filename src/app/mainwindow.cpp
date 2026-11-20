@@ -1,4 +1,6 @@
 #include "mainwindow.h"
+#include "uploads/uploadmonitor.h"
+#include <QTabWidget>
 #include "detection/activitytrigger.h"
 #include "blocking/websiteblocker.h"
 
@@ -75,7 +77,11 @@ MainWindow::MainWindow(QWidget *parent)
     history->setEditTriggers(QAbstractItemView::NoEditTriggers);
     history->setSelectionBehavior(QAbstractItemView::SelectRows);
     history->setWordWrap(false);
-    layout->addWidget(history);
+    auto *tabs = new QTabWidget;
+    tabs->addTab(history, "Application activity");
+    uploads = new UploadMonitor;
+    tabs->addTab(uploads, "File attachment attempts");
+    layout->addWidget(tabs);
     setCentralWidget(content);
 
     trigger = new ActivityTrigger(this);
@@ -120,6 +126,7 @@ MainWindow::MainWindow(QWidget *parent)
     });
     connect(clear, &QPushButton::clicked, this, [this] {
         history->setRowCount(0);
+        uploads->clearHistory();
         application->clear();
         currentUrl->clear();
         windowTitle->clear();
@@ -162,6 +169,7 @@ MainWindow::MainWindow(QWidget *parent)
 void MainWindow::setMonitoring(bool enabled)
 {
     monitoring = enabled;
+    uploads->setMonitoring(enabled);
     toggle->setText(enabled ? "Stop monitoring" : "Start monitoring");
     lastId.clear();
     lastUrl.clear();
@@ -331,6 +339,7 @@ void MainWindow::displayActivity(const QString &url, const QString &title)
 
 MainWindow::~MainWindow()
 {
+    uploads->setMonitoring(false);
     trigger->stop();
     probe->kill();
     probe->waitForFinished(1000);

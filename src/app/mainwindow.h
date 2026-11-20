@@ -15,6 +15,7 @@ class QProcess;
 class ActivityTrigger;
 class QCheckBox;
 class WebsiteBlocker;
+class UploadMonitor;
 
 class MainWindow : public QMainWindow
 {
@@ -39,6 +40,7 @@ private:
     QCheckBox *automationPrompts;
     WebsiteBlocker *websiteBlocker;
     QTableWidget *history;
+    UploadMonitor *uploads;
     ActivityTrigger *trigger;
     QTimer *retryTimer;
     QTimer *timeout;
