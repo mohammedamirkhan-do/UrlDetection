@@ -1,5 +1,6 @@
 #include "mainwindow.h"
-#include "activitytrigger.h"
+#include "detection/activitytrigger.h"
+#include "blocking/websiteblocker.h"
 
 #include <QCoreApplication>
 #include <QCheckBox>
@@ -9,6 +10,7 @@
 #include <QHBoxLayout>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
 #include <QLabel>
 #include <QLineEdit>
 #include <QProcess>
@@ -45,6 +47,8 @@ MainWindow::MainWindow(QWidget *parent)
     automationPrompts = new QCheckBox("Allow browser Automation permission prompts");
     automationPrompts->setToolTip("Off: use Accessibility or an existing browser grant. On: macOS may ask permission to read a browser through Automation.");
     layout->addWidget(automationPrompts);
+    websiteBlocker = new WebsiteBlocker(content);
+    layout->addWidget(websiteBlocker);
     status = new QLabel("Stopped. Start monitoring, then switch to an application. macOS may request permission.");
     status->setWordWrap(true);
     status->setTextFormat(Qt::PlainText);
@@ -93,6 +97,14 @@ MainWindow::MainWindow(QWidget *parent)
         if (monitoring)
             trigger->requestCheck();
     });
+    connect(websiteBlocker, &WebsiteBlocker::policyChanged, this, [this] {
+        if (probe->state() != QProcess::NotRunning) {
+            discardSample = true;
+            probe->kill();
+        }
+        if (monitoring)
+            trigger->requestCheck();
+    });
     connect(accessibility, &QPushButton::clicked, this, [this] {
         accessibilityAccess(true);
         status->setText("Enable UrlDetection in the access list. If absent, click + and select the built UrlDetection.app, then click Retry permissions.");
@@ -127,15 +139,16 @@ MainWindow::MainWindow(QWidget *parent)
         if (error == QProcess::FailedToStart) {
             timeout->stop();
             const QString message = "Unable to start the application reader: " + probe->errorString();
-            browserErrors.insert(pending.id, message);
             status->setText(message);
+            retryReader();
         }
     });
     connect(timeout, &QTimer::timeout, this, [this] {
-        const QString message = "Application request timed out. Check macOS permissions, then click Retry permissions.";
-        browserErrors.insert(pending.id, message);
+        const QString message = "Application request timed out. It will be retried automatically.";
         status->setText(message);
+        discardSample = true;
         probe->kill();
+        retryReader();
     });
 #ifndef Q_OS_MACOS
     toggle->setEnabled(false);
@@ -199,8 +212,20 @@ void MainWindow::pollBrowser()
     QStringList arguments{"--read-browser-url", app.id};
     if (automationPrompts->isChecked())
         arguments.append("--allow-automation-prompt");
+    const auto blockedDomains = websiteBlocker->activeDomains();
+    if (!blockedDomains.isEmpty())
+        arguments << "--blocked-domains" << QString::fromLatin1(
+            QJsonDocument(QJsonArray::fromStringList(blockedDomains)).toJson(QJsonDocument::Compact).toBase64());
     probe->start(QCoreApplication::applicationFilePath(), arguments);
     timeout->start(15000);
+}
+
+void MainWindow::retryReader()
+{
+    if (monitoring && remainingRetries > 0) {
+        --remainingRetries;
+        retryTimer->start();
+    }
 }
 
 void MainWindow::finishSample(int exitCode)
@@ -210,17 +235,22 @@ void MainWindow::finishSample(int exitCode)
     probe->readAllStandardError();
     if (!monitoring || discardSample || browserErrors.contains(pending.id))
         return;
-    if (foregroundApplication().id != pending.id)
-        return;
     QJsonParseError parseError;
     const auto document = QJsonDocument::fromJson(output, &parseError);
     if (exitCode != 0 || parseError.error != QJsonParseError::NoError || !document.isObject()) {
-        const QString message = "Application reader failed. Click Retry permissions to try again.";
-        browserErrors.insert(pending.id, message);
+        const QString message = "Application reader failed. It will be retried automatically.";
         status->setText(message);
+        retryReader();
         return;
     }
     const auto result = document.object();
+    const bool closeRequested = result.value("tabCloseRequested").toBool();
+    websiteBlocker->reportResult(pending.name, result.value("url").toString(), closeRequested,
+                                result.value("tabCloseError").toString());
+    if (closeRequested && monitoring)
+        trigger->requestCheck();
+    if (foregroundApplication().id != pending.id)
+        return;
     const QString error = result.value("error").toString();
     if (!error.isEmpty()) {
         browserErrors.insert(pending.id, error);

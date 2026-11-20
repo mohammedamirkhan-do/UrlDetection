@@ -14,6 +14,7 @@ BrowserReader browserReader(const QString &id)
         {"com.operasoftware.Opera", BrowserReader::Chromium},
         {"com.operasoftware.OperaGX", BrowserReader::Chromium},
         {"com.vivaldi.Vivaldi", BrowserReader::Chromium},
+        {"org.uc.UC", BrowserReader::Chromium},
         {"ru.yandex.desktop.yandex-browser", BrowserReader::Chromium},
         {"org.chromium.Chromium", BrowserReader::Chromium},
         {"company.thebrowser.Browser", BrowserReader::Chromium},
@@ -93,6 +94,7 @@ QString accessibleAddressUrl(const QString &role, const QString &identity,
 #ifndef Q_OS_MACOS
 bool accessibilityAccess(bool) { return false; }
 bool configureApplicationActivation(bool) { return true; }
+bool configureObserverActivation() { return false; }
 BrowserApplication foregroundApplication() { return {}; }
 BrowserResult readBrowserUrl(const QString &, bool)
 {

@@ -1,5 +1,5 @@
-#include "activitytrigger.h"
-#include "browserprobe.h"
+#include "detection/activitytrigger.h"
+#include "detection/browserprobe.h"
 #include "macprocess.h"
 
 #import <AppKit/AppKit.h>
@@ -92,7 +92,8 @@ void ActivityTrigger::refreshNative()
             return;
         state->clearAccessibility();
         NSRunningApplication *app = NSWorkspace.sharedWorkspace.frontmostApplication;
-        if (!app || app.processIdentifier == NSProcessInfo.processInfo.processIdentifier || !accessibilityAccess())
+        if (!app || app.processIdentifier == NSProcessInfo.processInfo.processIdentifier
+            || [app.bundleIdentifier isEqualToString:@"com.urldetection.desktop"] || !accessibilityAccess())
             return;
         const pid_t pid = applicationProcessId(app.processIdentifier, app.executableURL.path);
         if (pid <= 0 || AXObserverCreate(pid, accessibilityChanged, &state->observer) != kAXErrorSuccess)

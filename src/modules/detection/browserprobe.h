@@ -17,6 +17,7 @@ struct BrowserResult {
 
 BrowserApplication foregroundApplication();
 bool configureApplicationActivation(bool background);
+bool configureObserverActivation();
 bool accessibilityAccess(bool prompt = false);
 enum class BrowserReader { GenericAccessibility, BrowserAccessibility, Safari, Chromium };
 BrowserReader browserReader(const QString &id);

@@ -11,6 +11,6 @@
     <!-- Start without a Dock tile; only the main UI process opts into regular activation. -->
     <key>LSUIElement</key><true/>
     <key>NSAppleEventsUsageDescription</key>
-    <string>Display the full URL and title of the active browser tab when you enable monitoring.</string>
+    <string>Read browser URLs and titles while monitoring, and close tabs matching your website block list when tab blocking is enabled.</string>
 </dict>
 </plist>

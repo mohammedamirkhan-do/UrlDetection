@@ -8,9 +8,48 @@ Known browsers additionally require a valid full URL before an activity row is r
 
 A browser URL with an empty title waits up to 1.5 seconds, retrying every 500 ms, before entering history. This lets a quick redirect and its page title arrive together, while still recording pages that are genuinely untitled. Later title changes for the same application's consecutive URL update the existing row without changing its original detection time. A transient empty title does not erase an already captured title. Distinct URLs are preserved as distinct visits once recorded; redirect targets are not guessed from hostname or scheme similarities.
 
+## Project structure and responsiveness
+
+```text
+src/
+  app/                 # Entry point, worker modes and main window
+  modules/
+    detection/         # Browser registry, URL metadata and event supervision
+    blocking/          # Config/policy, block-list controls and tab-close scripts
+  platform/mac/        # Shared AppKit/Accessibility/Apple Events adapters
+resources/macos/       # Application bundle metadata
+config/                # Editable domain list, also bundled as a default
+```
+
+The two feature modules share the macOS adapter because reading and closing must use the same browser identity, focused window and URL checks. Platform code is kept out of the domain-policy parser and UI. The source tree is grouped in Qt Creator by CMake; open the root `CMakeLists.txt` as before. Config paths and the bundled executable name are unchanged.
+
+The GUI uses one persistent `--watch-activity` process for native observation and at most one short-lived `--read-browser-url` process for reading/closing. This keeps native Accessibility IPC and AppleScript work outside the UI event loop without moving AppKit calls onto arbitrary threads. The observer runs its own native event loop in accessory mode, with no window or Dock tile. Changes are coalesced at 150 ms; the GUI retains its 10-second fallback. A five-second health heartbeat is process supervision, not browser URL polling.
+
+Observer crashes restart automatically with a capped backoff. If no valid observer heartbeat/event arrives for 15 seconds, the five-second watchdog check kills and restarts that worker; the fallback still requests reads while it is unavailable. A read has a 15-second timeout. Transient startup failures, crashes and timeouts get up to two short retries and later event/fallback retries instead of permanently blocking that browser. Permission errors still require explicit permission correction/retry. Stop monitoring cancels queued retries and stops the observer and current read. The observer also quits when its output pipe closes, so a GUI crash does not leave a permanent orphan observer. History remains bounded to 1,000 rows and policies to 1,000 domains.
+
+This is resilience for a running desktop application, not a system daemon or an always-on network filter. Detection and tab closing are implemented for macOS; Windows/Linux need their own adapters. The default macOS deployment target is 14.4 (matching the Qt runtime used here); an explicit CMake setting or `MACOSX_DEPLOYMENT_TARGET` environment value is respected. Qt and every bundled dependency must also support the chosen target. Distribution still needs Qt deployment, a compatible CPU/build target and normal macOS permission/signing handling. No claim of support for every OS or Mac configuration is made.
+
+## Website blocking by closing browser tabs
+
+Website blocking uses the browser-tab-closing approach rather than a hosts-file change or Network Extension. It needs no administrator password or Apple Developer signing. It reacts to detected browser navigation: it does not stop the initial network request, and a page may begin loading before the tab closes.
+
+1. Click **Open website block list** and edit `config/blocked-websites.json`. Development builds use the project file; installed copies get a writable default under `QStandardPaths::AppConfigLocation`. The button tooltip shows the active path. The config is a simple JSON array: `["chatgpt.com", "deepseek.com"]`. List each base domain once, without URL schemes, paths or wildcards. All its subdomains are covered automatically. The earlier versioned `websites` object is still accepted for existing installations.
+2. Enable **Close blocked website tabs while monitoring**, then click **Start monitoring**. The checkbox is off on every fresh launch. Each valid detected HTTP/HTTPS URL is matched by hostname, including subdomains. `chatgpt.com` matches `chatgpt.com` and `sub.chatgpt.com`, but not `notchatgpt.com`, `chatgpt.com.example.org`, a username or a query-string mention. Unicode domains are normalized to ASCII. Separate domains such as `chat.openai.com` are not subdomains of `chatgpt.com` and require their own entry; brand ownership is not inferred.
+3. The reader subprocess rechecks the foreground browser, focused window and exact URL before closing. It uses selected-tab close controls, or native Close Tab menu items for Safari, UC, Yandex, Opera, Opera GX and Vivaldi. Arc uses its native Archive Tab menu action, including Little Arc windows. Safari changes Command-W to Close Window when only one tab remains; that menu action is allowed only when Close Tab is disabled and the unmodified Command-W item identifies the last-tab case. Window traffic-light buttons and injected keystrokes are never used. If no suitable control is exposed, Safari/Chromium-family browsers can fall back to a guarded AppleScript that rechecks the active tab URL.
+4. Accessibility is required for the control-based route. Existing browser Automation grants are reused for AppleScript. To request a missing browser grant, enable **Allow browser Automation permission prompts** and return to the browser. This is macOS browser-control consent, not an administrator password prompt. Firefox/Tor/DuckDuckGo rely on exposed tab controls rather than assuming Chromium scripting. A missing permission or unsupported control is displayed; it is never reported as a successful close.
+5. Saved JSON changes reload automatically and request a new foreground check. Invalid edits retain the last valid policy and show an error. An empty domain array (`[]`), unchecking the checkbox, stopping monitoring or closing the app stops new close requests. Existing browser tabs are not reopened automatically.
+
+Only the detected active tab in the foreground browser is targeted; this does not scan or close every background tab as EmpMonitor's periodic scripting loop does. Existing application/focus/Accessibility events trigger reads, with the existing 10-second fallback for unsupported events. Closing is attempted before the normal history/title-settling logic. The UI reports a close request; a browser's own unsaved-data dialog can still prevent completion. Switching tabs during a request can cause it to be skipped. Unexposed URLs or unsupported close controls cannot be enforced. Apps with custom/vertical tabs, localized controls, private-window variants and browser updates require live verification; do not assume universal browser coverage.
+
+Yandex can leave an empty window with a stale web-area URL after its last tab closes. The Accessibility reader now requires a selected browser tab before accepting that document URL, preventing repeated close requests against the stale page.
+
+No privileged helper, hosts/DNS modification, certificate installation or network interception is used. There is no system-wide enforcement after the app exits.
+
+If the earlier hosts-file version was already applied, its saved system entries remain until its `BEGIN/END UrlDetection website blocks` section is removed from `/etc/hosts` once with administrator approval. Switching to tab closing does not silently undo protected system settings. Remove that old section before testing tab-only behavior; preserve unrelated hosts entries.
+
 ## Additional browser coverage
 
-The registry in `browserprobe.cpp` separates browser recognition from the URL reader. The nine additional macOS browsers below are installed on the development Mac, and normal/private-window detection has been reported working during manual testing. These implementation routes do not guarantee coverage of every browser version or privacy configuration.
+The registry in `src/modules/detection/browserprobe.cpp` separates browser recognition from the URL reader. The nine additional macOS browsers below are installed on the development Mac, and normal/private-window detection has been reported working during manual testing. These implementation routes do not guarantee coverage of every browser version or privacy configuration.
 
 | Browser | macOS implementation / limitation |
 | --- | --- |
@@ -18,7 +57,7 @@ The registry in `browserprobe.cpp` separates browser recognition from the URL re
 | Opera GX | Chromium-style AppleScript route for `com.operasoftware.OperaGX`, with Accessibility fallback |
 | Brave | Existing Chromium-style AppleScript route; Accessibility fallback added |
 | Samsung Internet / Samsung Browser | No macOS adapter: the official desktop release is for Windows; mobile detection requires a separate platform integration |
-| UC Browser | No verified official macOS build or bundle ID; no guessed adapter added |
+| UC Browser | Installed `UC.app` verified as `org.uc.UC`; Chromium-style reader and native Close Tab menu support. Package provenance is not independently verified. |
 | Vivaldi | Existing Chromium-style AppleScript route; Accessibility fallback added |
 | Arc | Chromium-style active-tab AppleScript route for `company.thebrowser.Browser`, with Accessibility fallback; vendor availability/account requirements may limit testing |
 | DuckDuckGo Browser | Focused document/web-area Accessibility reader for `com.duckduckgo.macos.browser`; no Chrome scripting assumption |
@@ -54,7 +93,7 @@ Vivaldi renders its browser interface in its own extension. The detector exclude
 
 The macOS **Dock Tile Extension Added** notification for Arc refers to the `DockTilePlugIn.plugin` included in Arc itself. **Data Access Blocked** naming Arc reports Arc's own attempted data access. Neither notification is generated by the detector's URL-reading logic, and this app does not suppress or alter those system notifications. See Apple's [Automation permissions](https://support.apple.com/en-au/guide/mac-help/mchl07817563/mac) and [extension-notification explanation](https://developer.apple.com/videos/play/wwdc2024/10123/?time=1107).
 
-URL reads run in a separate invocation of the same bundled executable. Native notification subscriptions stay in the main application and are removed when monitoring stops; Accessibility IPC during observer setup uses short timeouts and a bounded focused-element ancestor walk. Reads time out after 15 seconds, and errors require an explicit retry instead of repeatedly prompting. No browser extensions, simulated keystrokes, screen recording or JavaScript injection are used.
+URL reads and tab closing run in a short-lived invocation of the same bundled executable. Native notification subscriptions live in the supervised observer process and stop when monitoring stops; Accessibility IPC during observer setup uses short timeouts and a bounded focused-element ancestor walk. Reads time out after 15 seconds; transient failures retry automatically, while permission errors require an explicit retry instead of repeatedly prompting. No browser extensions, simulated keystrokes, screen recording or JavaScript injection are used.
 
 The bundle starts as an agent to prevent the short-lived reader processes from adding and removing Dock icons. Reader processes use the prohibited activation policy; only the main UI process switches to the regular policy and appears in the Dock.
 
@@ -65,7 +104,7 @@ The bundle starts as an agent to prevent the short-lived reader processes from a
 - If AppKit reports an invalid process ID (observed with Safari), the observer resolves the exact executable among processes owned by the current user. Ambiguous matches are skipped rather than observing another application.
 - Bursts are coalesced within 150 ms. Events arriving during a URL read schedule a follow-up rather than starting overlapping readers.
 - An incomplete read gets up to two retries spaced 500 ms apart. Otherwise, the quiet-app fallback runs every 10 seconds, replacing the previous one-second polling loop.
-- Observer subscriptions are refreshed for the foreground app/window/focused element before each triggered read. Stop removes native observers and cancels queued checks and retries.
+- The background observer refreshes subscriptions for its foreground app/window/focused element on native notifications, independently of read completion. Stop kills that observer (macOS releases its subscriptions) and cancels queued checks and retries.
 
 Accessibility notifications are app-dependent and do not guarantee that every URL change emits an event (including same-title navigation and some web-app history updates). Those changes can take up to the fallback interval, plus read time, to appear. This implementation does not require browser extensions.
 
@@ -78,6 +117,16 @@ cmake -S . -B build/local -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
 cmake --build build/local
 open build/local/UrlDetection.app
 ```
+
+To produce a bundle with Qt runtime libraries included:
+
+```sh
+cmake --install build/local --prefix "$PWD/build/package"
+```
+
+Use a fresh staging directory for each package. On macOS with Qt 6.7+, CMake installs only the Cocoa platform and native-style plugins required by this Widgets app, then asks `macdeployqt` to deploy their dependencies. This avoids copying unrelated PDF/QML/virtual-keyboard plugins from a shared Qt installation. The resulting `build/package/UrlDetection.app` is a development bundle for the architecture and macOS deployment target used to build it, not a notarized universal distribution. Test on the target Mac and grant Accessibility/Automation as required; Qt deployment does not grant permissions or bypass Gatekeeper.
+
+On the current development machine, some transitive Homebrew libraries in the staged bundle advertise macOS 27.2 as their minimum even though the app and Qt frameworks target 14.4. The staged bundle is therefore a local test build, not a verified macOS 14.4 release. Use a consistent Qt/dependency SDK built for the intended minimum OS before distributing to older Macs; lowering the app's deployment target alone does not rebuild those dependencies. The current build is `arm64`; Intel/universal builds need matching Qt libraries and separate validation.
 
 To test manually, start monitoring and visit a URL with a path, query and fragment (for example `https://example.com/?q=test#section`); confirm the exact URL and application name appear promptly after the event (or within the fallback interval where a notification is unsupported). Open a second tab with another site, switch back, then switch browsers. Check that each detected change adds a row, an unchanged page does not repeatedly add rows, and permission denial displays an actionable error. Also switch to a text editor or IDE: confirm the application name, window title and any exposed document URL (possibly `file://`) appear. Switch documents and confirm the title changes, then return to a browser and check its full URL. Test Stop, Clear history and Retry permissions as well. Native accessibility behavior must be checked in a desktop session with Accessibility granted.
 

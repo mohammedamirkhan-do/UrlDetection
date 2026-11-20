@@ -4,7 +4,7 @@
 #include <QMainWindow>
 #include <QHash>
 #include <QElapsedTimer>
-#include "browserprobe.h"
+#include "detection/browserprobe.h"
 
 class QLabel;
 class QLineEdit;
@@ -14,6 +14,7 @@ class QTimer;
 class QProcess;
 class ActivityTrigger;
 class QCheckBox;
+class WebsiteBlocker;
 
 class MainWindow : public QMainWindow
 {
@@ -26,6 +27,7 @@ public:
 private:
     void pollBrowser();
     void finishSample(int exitCode);
+    void retryReader();
     void displayActivity(const QString &url, const QString &title);
     void setMonitoring(bool enabled);
 
@@ -35,6 +37,7 @@ private:
     QLineEdit *windowTitle;
     QPushButton *toggle;
     QCheckBox *automationPrompts;
+    WebsiteBlocker *websiteBlocker;
     QTableWidget *history;
     ActivityTrigger *trigger;
     QTimer *retryTimer;
